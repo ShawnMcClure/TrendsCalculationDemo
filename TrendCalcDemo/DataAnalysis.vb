@@ -1,4 +1,10 @@
-﻿Imports System.Data.SqlClient
+﻿' <copyright file="DataAnalysis.vb" company="Colorado State University">
+' Copyright (c) 2017 All Rights Reserved
+' </copyright>
+' <author>Shawn McCLure</author>
+' <date>03/23/2017 11:39:58 AM</date>
+
+Imports System.Data.SqlClient
 Imports System.IO
 Imports System.Xml
 

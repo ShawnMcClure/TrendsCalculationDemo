@@ -1,4 +1,10 @@
-﻿Public Class TrendSummaryTable : Inherits System.Web.UI.UserControl
+﻿' <copyright file="TrendSummaryTable.ascx.vb" company="Colorado State University">
+' Copyright (c) 2017 All Rights Reserved
+' </copyright>
+' <author>Shawn McCLure</author>
+' <date>03/23/2017 11:39:58 AM</date>
+
+Public Class TrendSummaryTable : Inherits System.Web.UI.UserControl
 
     ' Trend-related properties
     Protected _ColumnsToExcludeFromOutput() As String = Nothing
