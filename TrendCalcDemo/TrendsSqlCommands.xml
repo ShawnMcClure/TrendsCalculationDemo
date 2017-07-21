@@ -1,0 +1,200 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<Commands>
+    <CommandText ID="TrendDataStreams_NpsCatSites">
+        <![CDATA[
+        ;WITH T1 AS (
+            SELECT DISTINCT
+                ParkCode,
+	            DatasetID,
+	            SiteID,
+	            '905' AS ParamID,
+	            CONVERT(tinyint, 1) AS POC,
+	            CONVERT(int, EndYear - 9) AS StartYear,
+	            EndYear,
+	            A.AggregationID,
+	            CASE A.AggregationID
+		            WHEN 11 THEN 10
+		            WHEN 87 THEN 90
+	            END AS GroupNum
+            FROM NpsUnit_Site
+            CROSS JOIN (SELECT AggregationID FROM Aggregation WHERE AggregationID IN (11, 87)) A
+            WHERE DatasetID IN (10010)
+            AND EndYear IN ({eyrs})
+            GROUP BY ParkCode, DatasetID, SiteID, EndYear, A.AggregationID
+            UNION
+            SELECT DISTINCT
+                ParkCode,
+	            CASE WHEN DatasetID = 70001 AND EndYear >= 2014 THEN 70010 ELSE DatasetID END AS DatasetID,
+	            SiteID,
+	            CASE DatasetID
+		            WHEN 52003 THEN '3003'
+		            WHEN 52014 THEN '2547,2548,2550'
+		            WHEN 70001 THEN '3225,3372'
+	            END AS ParamID,
+	            CONVERT(tinyint, 1) AS POC,
+	            CONVERT(int, EndYear - 9) AS StartYear,
+	            EndYear,
+	            CONVERT(int, 3) AS AggregationID,
+	            CONVERT(tinyint, 0) AS GroupNum
+            FROM NpsUnit_Site
+            WHERE DatasetID IN (52003,52014,70001)
+            AND EndYear IN ({eyrs})
+            GROUP BY ParkCode, DatasetID, SiteID, EndYear
+        )
+        SELECT * FROM T1
+        ORDER BY ParkCode, DatasetID, EndYear
+		]]>
+    </CommandText>
+    <CommandText ID="TrendData_NpsCat_By_YearRange_CTE">
+        <![CDATA[
+        ;WITH T1 AS (
+        ------------------------------------------------------------------------------------------------------>>>
+        -- Manufacture records for each year in the desired timeframe (StartYear - EndYear) by CROSS-JOINING
+        -- the fact table (e.g. AirFact) against a calendar table (e.g. FactYear) to produce one primary key 
+        -- row for each sequential end year in the desired time frame. This preliminary operation will ensure 
+        -- that even if there are gaps in the data (i.e. one or more years missing) the result set will still 
+        -- contain a row for each year (i.e. missing data years will be present but will have a NULL data value).
+        ------------------------------------------------------------------------------------------------------>>>
+	        SELECT DISTINCT
+		        {DatasetID} AS DatasetID, 
+		        {SiteID} AS SiteID,
+		        P.ParamID,
+		        P.ParamCode,
+		        CASE ParamCode
+			        WHEN 'High4' THEN 'o3'
+                    WHEN 'dv' THEN 'vis_' + CONVERT(varchar, AggregationID)
+			        WHEN 'W126' THEN 'w126'
+			        WHEN 'N' THEN 'ndep'
+			        WHEN 'S' THEN 'sdep'
+			        ELSE ParamCode
+		        END AS StreamKey,
+		        A.AggregationID,
+		        YearNum 
+	        FROM FactYear AS FY
+	        INNER JOIN Parameter P ON P.ParamID IN ({ParamID})
+	        INNER JOIN Aggregation A ON A.AggregationID IN ({AggregationID})
+	        WHERE (FY.YearNum BETWEEN {StartYear} AND {EndYear})
+        ),
+        T2 AS (
+	        SELECT DISTINCT 
+		        T1.DatasetID, 
+		        T1.SiteID, 
+		        T1.ParamID, 
+		        T1.ParamCode,
+		        T1.StreamKey,
+		        T1.AggregationID,
+		        YearNum,
+		        POC, 
+		        MethodID, 
+		        UnitID, 
+		        CASE 
+			        WHEN F.FactValue IS NULL OR F.FactValue = -999 THEN NULL 
+			        ELSE
+				        CASE T1.ParamID
+					        WHEN 2547 THEN CASE WHEN ((CONVERT(int, LTRIM(RTRIM(Flag2))) < 50) OR (CONVERT(int, LTRIM(RTRIM(Flag3))) < 75) OR (CONVERT(int, LTRIM(RTRIM(Flag4))) < 50) OR (ISNUMERIC(Flag2) = 0 OR ISNUMERIC(Flag3) = 0 OR ISNUMERIC(Flag4) = 0)) THEN NULL ELSE F.FactValue * 0.7765 END
+					        WHEN 2548 THEN CASE WHEN ((CONVERT(int, LTRIM(RTRIM(Flag2))) < 50) OR (CONVERT(int, LTRIM(RTRIM(Flag3))) < 75) OR (CONVERT(int, LTRIM(RTRIM(Flag4))) < 50) OR (ISNUMERIC(Flag2) = 0 OR ISNUMERIC(Flag3) = 0 OR ISNUMERIC(Flag4) = 0)) THEN NULL ELSE F.FactValue * 0.2259 END
+					        WHEN 2550 THEN CASE WHEN ((CONVERT(int, LTRIM(RTRIM(Flag2))) < 50) OR (CONVERT(int, LTRIM(RTRIM(Flag3))) < 75) OR (CONVERT(int, LTRIM(RTRIM(Flag4))) < 50) OR (ISNUMERIC(Flag2) = 0 OR ISNUMERIC(Flag3) = 0 OR ISNUMERIC(Flag4) = 0)) THEN NULL ELSE F.FactValue * 0.3338 END
+					        WHEN 3003 THEN CASE WHEN ((CONVERT(int, LTRIM(RTRIM(Flag2))) < 50) OR (CONVERT(int, LTRIM(RTRIM(Flag3))) < 75) OR (CONVERT(int, LTRIM(RTRIM(Flag4))) < 50) OR (ISNUMERIC(Flag2) = 0 OR ISNUMERIC(Flag3) = 0 OR ISNUMERIC(Flag4) = 0)) THEN NULL ELSE F.FactValue END
+					        WHEN 3372 THEN CASE WHEN F.AuxValue1 < 75 THEN NULL ELSE F.FactValue END
+					        ELSE F.FactValue
+				        END
+		        END AS FactValue
+	        FROM T1
+	        LEFT OUTER JOIN AirFact F ON T1.DatasetID = F.DatasetID AND T1.SiteID = F.SiteID AND T1.ParamID = F.ParamID AND T1.AggregationID = F.AggregationID AND T1.YearNum = YEAR(F.FactDate)
+        ),
+        T3 AS (
+        ------------------------------------------------------------------------------------------------------>>>
+        -- This query is needed only for the purposes generating the "ndep" and "sdep" data streams. The base
+        -- parameters for each data stream (NH4 and NO3, and SO4, respectively) are needed separately for the
+        -- NPS Web Map Service, but the composite indicator "ndep" is generated in the next step by adding the
+        -- NH4 and NO3 parameters, and is needed as a separate data stream itself by the NPS Conditions & Trends
+        -- tools. So here, we perform a UNION across two queries of the preceding table in order to duplicate
+        -- the NH3 and NO3 data streams for subsequent combination to form the "ndep" data stream in the next step.
+        -- The "sdep" and "SO4" data streams are essentially duplicates of the same rows, but are kept separate
+        -- by this step because the NPS Web Map Service needs both, by their different names.
+        ------------------------------------------------------------------------------------------------------>>>
+	        SELECT * FROM T2
+	        UNION
+	        SELECT 
+		        DatasetID, SiteID, ParamID, 
+		        CASE 
+			        WHEN ParamID IN (2547,2548) THEN 'ndep'
+			        WHEN ParamID IN (2550) THEN 'sdep'
+		        END AS ParamCode,
+		        CASE 
+			        WHEN ParamID IN (2547,2548) THEN 'ndep'
+			        WHEN ParamID IN (2550) THEN 'sdep'
+		        END AS StreamKey,
+		        AggregationID, YearNum, POC, MethodID, UnitID, FactValue
+	        FROM T2
+	        WHERE ParamID IN (2547,2548,2550)
+        ),
+        T4 AS (
+        ------------------------------------------------------------------------------------------------------>>>
+        -- Generate the "ndep" data stream by combining (adding) the NH4 and NO3 values for each year.
+        ------------------------------------------------------------------------------------------------------>>>
+	        SELECT DISTINCT
+		        ParamCode, StreamKey, DatasetID, SiteID,
+		        CASE
+			        WHEN ParamCode = 'ndep' THEN AVG(2600)
+			        WHEN ParamCode = 'sdep' THEN AVG(2700)
+			        ELSE AVG(ParamID)
+		        END AS ParamID,
+		        POC, MethodID, UnitID, AggregationID, YearNum,
+		        CASE
+			        WHEN ParamCode = 'ndep' THEN AVG(CASE ParamID WHEN 2547 THEN FactValue ELSE NULL END) + AVG(CASE ParamID WHEN 2548 THEN FactValue ELSE NULL END)
+			        ELSE AVG(FactValue)
+		        END AS Value
+	        FROM T3
+	        GROUP BY ParamCode, StreamKey, DatasetID, SiteID, POC, MethodID, UnitID, AggregationID, YearNum
+        ),
+        T5 AS (
+        ------------------------------------------------------------------------------------------------------>>>
+        -- Generate the StreamKey, Network, Date, and RhrGroup fields, and add (via JOINs) select fields from 
+        -- the Site and Unit tables. Also modify the ParamCode field for the "ndep" and "sdep" data records.
+        ------------------------------------------------------------------------------------------------------>>>
+	        SELECT
+		        CASE 
+			        WHEN ParamCode IN ('ndep','NH4','NO3','sdep','SO4','hg') THEN 'NADP'
+			        WHEN ParamCode IN ('4h8hrO3Sea','max3mppm_W126_12hr') THEN 'AQS'
+			        WHEN ParamCode IN ('dv') THEN 'IMPROVE'
+		        END AS Network,
+		        S.SiteCode AS Site, 
+		        S.SiteName, 
+		        S.State,
+		        ParamID,
+		        CASE ParamCode
+			        WHEN 'ndep' THEN 'N'
+			        WHEN 'sdep' THEN 'S'
+			        ELSE ParamCode
+		        END AS ParamCode,
+		        StreamKey, 
+		        CONVERT(datetime, '1/1/' + CONVERT(varchar, YearNum)) AS Date,
+		        YearNum,
+		        AggregationID,
+		        CASE AggregationID WHEN 11 THEN '10' WHEN 87 THEN '90' ELSE '---' END AS RhrGroup,
+		        Value,
+		        U.UnitAbbr AS Units
+	        FROM T4
+	        INNER JOIN Site S ON T4.SiteID = S.SiteID
+	        LEFT OUTER JOIN Unit U ON T4.UnitID = U.UnitID
+        ),
+        T6 AS (
+        ------------------------------------------------------------------------------------------------------>>>
+        -- Generate the StreamKey field and add the ParamName field from the Parameter table. Also round Value.
+        ------------------------------------------------------------------------------------------------------>>>
+	        SELECT
+		        StreamKey, Network, Site, SiteName, State, T5.ParamCode AS Parameter, 
+		        CASE T5.ParamCode
+			        WHEN 'N' THEN 'N from Nitrate and Ammonium'
+			        WHEN 'S' THEN 'S from Sulfate'
+			        ELSE ParamName
+		        END AS ParamName,
+		        [Date], YearNum AS [Year], RhrGroup, ROUND(Value, 5) AS Value, Units
+	        FROM T5
+	        LEFT OUTER JOIN Parameter P ON T5.ParamID = P.ParamID
+        )
+        SELECT * FROM T6 ORDER BY StreamKey, [Year]
+		]]>
+    </CommandText>
+</Commands>
